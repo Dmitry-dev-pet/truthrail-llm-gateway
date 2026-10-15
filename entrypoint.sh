@@ -16,11 +16,11 @@ valid_provider_key() {
 }
 
 # The public candidate never synchronizes OAuth/session files to Git.
-for var in GITSTORE_GIT_URL GITSTORE_GIT_TOKEN GITSTORE_GIT_USERNAME MANAGEMENT_PASSWORD PGSTORE_DSN OBJECTSTORE_ENDPOINT; do
-  eval "present=\${$var:-}"
-  [ -z "$present" ] || fail 'legacy_credentials_or_storage_not_allowed'
-done
-unset present
+if [ -n "${GITSTORE_GIT_URL:-}" ] || [ -n "${GITSTORE_GIT_TOKEN:-}" ] ||
+   [ -n "${GITSTORE_GIT_USERNAME:-}" ] || [ -n "${MANAGEMENT_PASSWORD:-}" ] ||
+   [ -n "${PGSTORE_DSN:-}" ] || [ -n "${OBJECTSTORE_ENDPOINT:-}" ]; then
+  fail 'legacy_credentials_or_storage_not_allowed'
+fi
 
 port="${PORT:-10000}"
 case "$port" in ''|*[!0-9]*) fail 'invalid_port' ;; esac
