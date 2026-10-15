@@ -1,0 +1,17 @@
+# Source-only Render deployment: no real credentials are committed.
+services:
+  - type: web
+    name: truthrail-llm-gateway
+    runtime: docker
+    region: frankfurt
+    plan: free
+    dockerfilePath: Dockerfile
+    dockerContext: .
+    autoDeployTrigger: 'off'
+    envVars:
+      - key: PORT
+        value: '10000'
+      - key: CPA_CLIENT_API_KEY
+        generateValue: true
+      - key: CPA_OPENCODE_GO_API_KEY
+        sync: false
