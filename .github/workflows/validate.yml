@@ -1,0 +1,65 @@
+name: Gateway validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify shell and Python tests
+        run: |
+          set -euo pipefail
+          sh -n entrypoint.sh
+          python3 -m pip install --disable-pip-version-check -r requirements-test.txt
+          python3 -m unittest discover -s tests -v
+          python3 -m compileall -q tests
+
+      - name: Build reviewed Docker image
+        run: |
+          set -euo pipefail
+          docker build --pull -t truthrail-gateway:ci .
+
+      - name: Check isolated sealed container and reject anonymous inference
+        run: |
+          set -euo pipefail
+          docker run -d --name truthrail-gateway-ci \
+            -e PORT=10000 \
+            -p 127.0.0.1:18317:10000 \
+            truthrail-gateway:ci
+          trap 'docker rm -f truthrail-gateway-ci >/dev/null 2>&1 || true' EXIT
+          status=000
+          for i in $(seq 1 30); do
+            status=$(curl -sS --max-time 2 -o /dev/null -w '%{http_code}' \
+              http://127.0.0.1:18317/v1/models 2>/dev/null || true)
+            if [ "$status" != "000" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$status" = "000" ]; then
+            docker logs truthrail-gateway-ci
+            echo "::error::Sealed container never opened its HTTP port"
+            exit 1
+          fi
+          auth_status=$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' \
+            -X POST 'http://127.0.0.1:18317/v1/chat/completions' \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"opencode-go/glm-5.3-flash","messages":[{"role":"user","content":"ping"}]}' || true)
+          case "$auth_status" in
+            401|403) ;;
+            *) echo "::error::Anonymous completions were not denied (HTTP $auth_status)"; exit 1 ;;
+          esac
+          docker logs truthrail-gateway-ci 2>&1 | grep -q 'gateway=SEALED'
+          echo "docker_boot=PASS auth_boundary=PASS upstream_calls=0"

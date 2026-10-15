@@ -1,0 +1,15 @@
+.git
+.github
+tests
+*.pyc
+__pycache__
+*.env
+.env*
+*secret*
+*token*
+*.pem
+*.key
+render.yaml
+README.md
+AGENTS.md
+requirements-test.txt
