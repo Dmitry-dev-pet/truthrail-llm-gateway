@@ -56,6 +56,23 @@ OpenCode Go is intended for coding agents. This gateway does not authorize
 arbitrary unrelated prompts, even though the underlying HTTP protocol accepts
 chat-style requests. Callers must use the approved coding-only task scope.
 
+## Staged GPT 6 Luna Responses model (NOT deployed)
+
+The existing Render gateway still serves the verified GLM coding route
+unless the operator explicitly sets `CPA_OPENCODE_GO_LUNA_ENABLED=1`
+**after review**. The exact flag adds `opencode-go/gpt-6-luna` through
+CLIProxyAPI's native `codex` Responses provider alongside the unchanged
+GLM Chat Completions model; invalid flags or missing keys fail closed.
+
+The Codex adapter requires per-key disable-codex-cloaking and an
+**instance-wide** image-generation passthrough setting, so a real dual-model
+smoke and GLM regression check are mandatory before changing the
+production Render environment. It does not permit automatic news
+summarization, generic model inference, AGY OAuth use or arbitrary
+provider/model fallback. The current `render.yaml` has autoDeploy OFF.
+
+See [the Luna protocol and rollback runbook](docs/LUNA_RESPONSES_ROLLOUT.md).
+
 ## Tests
 
 ```sh
