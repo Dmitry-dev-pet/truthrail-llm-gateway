@@ -122,6 +122,65 @@ class Handler(BaseHTTPRequestHandler):
                                   "wrong_model", "unexpected_tools")):
             return self._send(400, {"error": "synthetic_contract_mismatch"})
         COUNTS[kind] += 1
+        if kind == "luna" and payload.get("stream") is True:
+            # CLIProxyAPI's native Codex executor may request SSE upstream
+            # even when the downstream user asked for one completed object.
+            result = luna_response()
+            created = {**result, "status": "in_progress", "output": []}
+            events = [
+                ("response.created", {
+                    "type": "response.created", "response": created,
+                    "sequence_number": 0,
+                }),
+                ("response.output_item.added", {
+                    "type": "response.output_item.added", "sequence_number": 1,
+                    "output_index": 0,
+                    "item": {"id": "msg-local-luna", "type": "message",
+                             "status": "in_progress", "role": "assistant",
+                             "content": []},
+                }),
+                ("response.content_part.added", {
+                    "type": "response.content_part.added", "sequence_number": 2,
+                    "output_index": 0, "content_index": 0,
+                    "part": {"type": "output_text", "text": "",
+                             "annotations": []},
+                }),
+                ("response.output_text.delta", {
+                    "type": "response.output_text.delta", "sequence_number": 3,
+                    "output_index": 0, "content_index": 0, "delta": "PASS",
+                }),
+                ("response.output_text.done", {
+                    "type": "response.output_text.done", "sequence_number": 4,
+                    "output_index": 0, "content_index": 0, "text": "PASS",
+                }),
+                ("response.content_part.done", {
+                    "type": "response.content_part.done", "sequence_number": 5,
+                    "output_index": 0, "content_index": 0,
+                    "part": {"type": "output_text", "text": "PASS",
+                             "annotations": []},
+                }),
+                ("response.output_item.done", {
+                    "type": "response.output_item.done", "sequence_number": 6,
+                    "output_index": 0, "item": result["output"][0],
+                }),
+                ("response.completed", {
+                    "type": "response.completed", "sequence_number": 7,
+                    "response": result,
+                }),
+            ]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            for event, obj in events:
+                self.wfile.write(
+                    ("event: " + event + "\ndata: " +
+                     json.dumps(obj, separators=(",", ":")) + "\n\n").encode()
+                )
+                self.wfile.flush()
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            return
         return self._send(200, glm_response() if kind == "glm" else luna_response())
 
 
