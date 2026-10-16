@@ -68,7 +68,7 @@ class DualGatewaySmokeContracts(unittest.TestCase):
         self.assertNotIn('"--publish"', source)
         self.assertNotIn('"--env-file"', source)
         self.assertNotIn("AGY_OAUTH", source)
-        self.assertNotIn("OPENCODE_GO_API_KEY", source)
+        self.assertEqual(source.count('"CPA_OPENCODE_GO_API_KEY": UPSTREAM_KEY'), 1)
         self.assertNotIn("docker.sock", source)
 
     def test_real_entrypoint_keeps_single_binary(self):
