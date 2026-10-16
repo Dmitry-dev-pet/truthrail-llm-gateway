@@ -63,3 +63,15 @@ jobs:
           esac
           docker logs truthrail-gateway-ci 2>&1 | grep -q 'gateway=SEALED'
           echo "docker_boot=PASS auth_boundary=PASS upstream_calls=0"
+      # Exactly reviewed same-owner PRs only. This job has no secrets and
+      # runs the tested image exclusively with dummy credentials on Docker
+      # --internal, so no provider endpoint can be contacted.
+      - name: Verify existing GLM and opt-in Luna with pinned Docker binary
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.user.login == github.repository_owner &&
+          github.actor == github.repository_owner
+        run: |
+          set -euo pipefail
+          python3 tests/run_dual_gateway_smoke.py

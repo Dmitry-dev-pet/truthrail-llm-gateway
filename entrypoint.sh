@@ -40,6 +40,21 @@ if [ -n "${CPA_OPENCODE_GO_API_KEY:-}" ]; then
   sealed=0
 fi
 
+# Luna is an explicit, individually reviewed coding-only Responses opt-in.
+# Invalid or empty input must never silently select or enable a model.
+luna_mode="${CPA_OPENCODE_GO_LUNA_ENABLED-0}"
+case "$luna_mode" in
+  0|1) ;;
+  *) fail 'invalid_luna_opt_in' ;;
+esac
+if [ "$luna_mode" = 1 ] && [ "$sealed" = 1 ]; then
+  fail 'luna_requires_existing_upstream_key'
+fi
+if [ "${CPA_OPENCODE_GO_RESPONSES_MODELS+x}" = x ] ||
+   [ "${CPA_OPENCODE_GO_MESSAGES_MODELS+x}" = x ]; then
+  fail 'dynamic_protocol_model_selection_not_reviewed'
+fi
+
 if [ -z "${CPA_CLIENT_API_KEY:-}" ]; then
   # Sealed mode is health-only: inaccessible random client key, no upstream.
   [ "$sealed" = 1 ] || fail 'client_key_required_for_upstream'
@@ -63,6 +78,10 @@ trap 'rm -f "$tmp"' EXIT HUP INT TERM
   printf 'access:\n  api-keys:\n    - "%s"\n' "$CPA_CLIENT_API_KEY"
   printf 'oauth:\n  auth-dir: "%s/auth"\n' "$root"
   printf 'routing:\n  retry:\n    request-retry: 0\n'
+  if [ "$luna_mode" = 1 ]; then
+    # This switch is instance-wide; a live rollout needs GLM coexistence review.
+    printf 'multimedia:\n  disable-image-generation: passthrough\n'
+  fi
   if [ "$sealed" = 1 ]; then
     printf 'api-keys: {}\n'
   else
@@ -75,6 +94,18 @@ trap 'rm -f "$tmp"' EXIT HUP INT TERM
     printf '        User-Agent: "Truthrail-Coding-Agent/1.0"\n'
     printf '      keys:\n        - api-key: "%s"\n' "$CPA_OPENCODE_GO_API_KEY"
     printf '      models:\n        - name: "glm-5.3-flash"\n          alias: "glm-5.3-flash"\n'
+    if [ "$luna_mode" = 1 ]; then
+      # Same authorized Go reseller key, but a separate Responses-capable provider.
+      printf '  codex:\n    - name: "opencode-go-luna-coding"\n'
+      printf '      prefix: "opencode-go"\n'
+      printf '      base-url: "https://opencode.ai/inference/go/openai/v1"\n'
+      printf '      request-retry: 0\n'
+      printf '      headers:\n        X-OpenCode-Session: "$X-OpenCode-Session"\n'
+      printf '        User-Agent: "Truthrail-Coding-Agent/1.0"\n'
+      printf '      keys:\n        - api-key: "%s"\n          disable-codex-cloaking: true\n' "$CPA_OPENCODE_GO_API_KEY"
+      printf '      models:\n        - name: "gpt-6-luna"\n          alias: "gpt-6-luna"\n'
+    fi
+
   fi
 } > "$tmp"
 
@@ -82,13 +113,17 @@ chmod 600 "$tmp"
 mv "$tmp" "$root/config.yaml"
 trap - EXIT HUP INT TERM
 
-unset CPA_CLIENT_API_KEY CPA_OPENCODE_GO_API_KEY
+unset CPA_CLIENT_API_KEY CPA_OPENCODE_GO_API_KEY CPA_OPENCODE_GO_LUNA_ENABLED
 
 if [ "${CPA_VALIDATE_ONLY:-}" = 1 ]; then
   if [ "$sealed" = 1 ]; then
     printf 'gateway=SEALED provider_count=0\n'
   else
-    printf 'gateway=CONFIGURED provider_count=1 model=opencode-go/glm-5.3-flash\n'
+    if [ "$luna_mode" = 1 ]; then
+      printf 'gateway=CONFIGURED provider_count=2 models=opencode-go/glm-5.3-flash,opencode-go/gpt-6-luna opt_in=true\n'
+    else
+      printf 'gateway=CONFIGURED provider_count=1 model=opencode-go/glm-5.3-flash\n'
+    fi
   fi
   exit 0
 fi
@@ -97,5 +132,8 @@ if [ "$sealed" = 1 ]; then
   printf 'gateway=SEALED upstream_not_configured\n'
 else
   printf 'gateway=STARTING model=opencode-go/glm-5.3-flash\n'
+  if [ "$luna_mode" = 1 ]; then
+    printf 'gateway=LUNA_STAGED model=opencode-go/gpt-6-luna coding_only=true\n'
+  fi
 fi
 exec /CLIProxyAPI/CLIProxyAPI --config "$root/config.yaml"
