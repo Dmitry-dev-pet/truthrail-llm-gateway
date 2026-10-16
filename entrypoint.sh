@@ -42,7 +42,7 @@ fi
 
 # Luna is an explicit, individually reviewed coding-only Responses opt-in.
 # Invalid or empty input must never silently select or enable a model.
-luna_mode="${CPA_OPENCODE_GO_LUNA_ENABLED:-0}"
+luna_mode="${CPA_OPENCODE_GO_LUNA_ENABLED-0}"
 case "$luna_mode" in
   0|1) ;;
   *) fail 'invalid_luna_opt_in' ;;
