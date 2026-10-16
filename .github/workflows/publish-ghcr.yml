@@ -1,0 +1,78 @@
+name: Publish validated Truthrail LLM gateway to GHCR
+
+# Never publish from a PR or from an unreviewed commit. The published
+# artifact is still sealed until a separate, reviewed secret handoff.
+on:
+  workflow_run:
+    workflows: ["Gateway validation"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Confirm validated commit is still current main
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          main_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
+          test "$main_sha" = "$EXPECTED_SHA"
+          sh -n entrypoint.sh
+      - name: Build pinned CLIProxyAPI wrapper
+        run: docker build --pull -t truthrail-gateway:publish .
+      - name: Verify sealed runtime and anonymous denial before registry auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name truthrail-gateway-publish \
+            -e PORT=10000 -p 127.0.0.1:18319:10000 \
+            truthrail-gateway:publish
+          trap 'docker rm -f truthrail-gateway-publish >/dev/null 2>&1 || true' EXIT
+          ready=0
+          for _ in $(seq 1 30); do
+            status="$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' \
+              http://127.0.0.1:18319/v1/models || true)"
+            if [ "$status" = 401 ] || [ "$status" = 403 ]; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1
+          code="$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"opencode-go/glm-5.3-flash","messages":[{"role":"user","content":"ping"}]}' \
+            http://127.0.0.1:18319/v1/chat/completions)"
+          test "$code" = 401 || test "$code" = 403
+          docker logs truthrail-gateway-publish 2>&1 | grep -q 'gateway=SEALED'
+          echo 'sealed=PASS anonymous_inference=DENIED provider_calls=0'
+      - name: Publish immutable source-SHA image
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/dmitry-dev-pet/truthrail-llm-gateway:$VERIFIED_SHA"
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          docker tag truthrail-gateway:publish "$image"
+          docker push "$image"
+          echo "published=$image" >> "$GITHUB_STEP_SUMMARY"
